@@ -12,7 +12,18 @@ const app = express();
 // Set the view engine to ejs
 app.set('view engine', 'ejs');
 
+// Middleware that parses requests with json
 app.use(bodyParser.json());
+
+// Serve static files from the public directory
+app.use(express.static('public'));
+
+// Session setup
+app.use(session({
+    secret: process.env.SECRET_KEY,
+    resave: false,
+    saveUninitialized: true
+}));
 
 // Set up Sequelize
 const sequelize = new Sequelize(process.env.DB_NAME, process.env.DB_USER, process.env.DB_PASS, {
@@ -49,68 +60,24 @@ const Feed = sequelize.define('feed', {
     timestamps: false
 });
 
-
-// Associations
+// Associations (primary and foreign key connections)
 User.hasMany(Feed, { foreignKey: 'username' });
 Feed.belongsTo(User, { foreignKey: 'username' });
-
-// Session setup
-app.use(session({
-    secret: process.env.SECRET_KEY, // replace with a real secret key
-    resave: false,
-    saveUninitialized: true
-}));
-
-app.use(express.static('public'));
 
 // Sync the models with the database
 sequelize.sync({ alter: true });
 
 // Routes
-
+// Profile page
 app.get('/profile', (req, res) => {
     res.sendFile(__dirname + '/public/profile.html');
-});
-
-// Route to fetch user profile
-app.get('/api/userProfile', async (req, res) => {
-    // Check if the user is authenticated
-    if (!req.session.username) {
-        return res.status(401).send('User not authenticated');
-    }
-
-    try {
-        // Find the user in the database using the username stored in the session
-        const user = await User.findOne({ where: { username: req.session.username } });
-        if (!user) {
-            return res.status(404).send('User not found');
-        }
-
-        // Respond with the user's profile information
-        res.json({
-            username: user.username,
-            bio: user.bio
-            // Add other fields you want to include in the user profile response
-        });
-    } catch (error) {
-        // Handle any potential errors
-        res.status(500).send('Server error: ' + error.message);
-    }
-});
-
-app.get('/api/checkSession', (req, res) => {
-    if (req.session.username) {
-        res.json({ isAuthenticated: true });
-    } else {
-        res.json({ isAuthenticated: false });
-    }
 });
 
 // Sign Up Route
 app.post('/signup', async (req, res) => {
     try {
         const hashedPassword = await bcrypt.hash(req.body.password, 10);
-        const user = await User.create({
+        await User.create({
             username: req.body.username,
             password: hashedPassword,
             bio: ''
@@ -136,6 +103,52 @@ app.post('/signin', async (req, res) => {
         }
     } else {
         res.status(404).send({ message: 'User not found' });
+    }
+});
+
+// Sign Out Route
+app.post('/signout', (req, res) => {
+    // Destroy the session
+    req.session.destroy(err => {
+        if (err) {
+            console.error('Error destroying session:', err);
+            return res.status(500).send('Error signing out');
+        }
+        res.send('Signed out successfully');
+    });
+});
+
+// Route to fetch user profile
+app.get('/api/userProfile', async (req, res) => {
+    // Check if the user is authenticated
+    if (!req.session.username) {
+        return res.status(401).send('User not authenticated');
+    }
+
+    try {
+        // Find the user in the database using the username stored in the session
+        const user = await User.findOne({ where: { username: req.session.username } });
+        if (!user) {
+            return res.status(404).send('User not found');
+        }
+
+        // Respond with the user's profile information
+        res.json({
+            username: user.username,
+            bio: user.bio
+        });
+    } catch (error) {
+        // Handle any potential errors
+        res.status(500).send('Server error: ' + error.message);
+    }
+});
+
+// Check if user is signed in
+app.get('/api/checkSession', (req, res) => {
+    if (req.session.username) {
+        res.json({ isAuthenticated: true });
+    } else {
+        res.json({ isAuthenticated: false });
     }
 });
 
@@ -169,6 +182,7 @@ app.get('/api/feeds', (req, res) => {
     });
 });
 
+// Route for posting to feed
 app.post('/api/feeds', async (req, res) => {
     // Check if the user is authenticated
     if (!req.session.username) {
@@ -176,14 +190,12 @@ app.post('/api/feeds', async (req, res) => {
     }
 
     try {
-        // Retrieve the username from the User model using the session username
-        const user = await User.findByPk(req.session.username);
+        const user = await User.findByPk(req.session.username); // Retrieve the username from the User model using the session username
         if (!user) {
             return res.status(404).send('User not found');
         }
 
-        // Extract message from the request body
-        const { message } = req.body;
+        const { message } = req.body; // Extract message from the request body
 
         // Create a new Feed entry
         const feed = await Feed.create({
@@ -198,17 +210,7 @@ app.post('/api/feeds', async (req, res) => {
     }
 });
 
-app.post('/signout', (req, res) => {
-    // Destroy the session
-    req.session.destroy(err => {
-        if (err) {
-            console.error('Error destroying session:', err);
-            return res.status(500).send('Error signing out');
-        }
-        res.send('Signed out successfully');
-    });
-});
-
+// Route for viewing another persons profile
 app.get('/profile/:username', async (req, res) => {
     const username = req.params.username;
 
@@ -218,18 +220,15 @@ app.get('/profile/:username', async (req, res) => {
         });
 
         if (user) {
-            // Send the user's profile information
-            // You might render an HTML page here or send JSON data
-            res.render('userProfile', { // Assuming you're using a template engine like EJS
+            // Populate the template with the user's profile information and render it
+            res.render('userProfile', {
                 username: user.username,
                 bio: user.bio
             });
         } else {
-            // User not found
             res.status(404).send('User not found');
         }
     } catch (error) {
-        // Handle errors
         console.error('Error fetching user profile:', error);
         res.status(500).send('Server error');
     }
@@ -239,5 +238,5 @@ app.get('/profile/:username', async (req, res) => {
 // Start the server
 const PORT = 3000;
 app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}.`);
+    console.log(`Server is running on 127.0.0.1:${PORT}.`);
 });
