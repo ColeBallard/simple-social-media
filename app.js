@@ -1,4 +1,6 @@
-require('dotenv').config();
+if (process.env.NODE_ENV !== 'production') {
+    require('dotenv').config();
+}
 
 const express = require('express');
 const bcrypt = require('bcrypt');
@@ -26,9 +28,14 @@ app.use(session({
 }));
 
 // Set up Sequelize
-const sequelize = new Sequelize(process.env.DB_NAME, process.env.DB_USER, process.env.DB_PASS, {
-    host: 'localhost',
-    dialect: 'mysql'
+const sequelize = new Sequelize(process.env.DATABASE_URL, {
+    dialect: 'mysql',
+    dialectOptions: {
+        ssl: {
+            require: true,
+            rejectUnauthorized: false  // This line is necessary if using a self-signed certificate (which is common on Heroku)
+        }
+    }
 });
 
 // Define the User model
@@ -236,7 +243,7 @@ app.get('/profile/:username', async (req, res) => {
 
 
 // Start the server
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Server is running on 127.0.0.1:${PORT}.`);
 });
